@@ -35,5 +35,5 @@ class Dataset(BaseDataset):
         self.sfreq = sfreq
 
         return dict(
-            dataset=dataset, paradigm_name="LeftRightImagery", sfreq=sfreq
+            dataset=dataset, sfreq=sfreq
         )

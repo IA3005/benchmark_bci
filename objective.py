@@ -6,12 +6,11 @@ from benchopt import BaseObjective, safe_import_context
 with safe_import_context() as import_ctx:
     import numpy as np
     from sklearn.dummy import DummyClassifier
-    from sklearn.model_selection import train_test_split
     from sklearn.metrics import balanced_accuracy_score as BAS
     from sklearn.metrics import accuracy_score
-
+    from sklearn.model_selection import KFold, LeaveOneGroupOut
     from skorch.helper import SliceDataset, to_numpy
-    from benchmark_utils.dataset import split_windows_train_test
+
 # The benchmark objective must be named `Objective` and
 # inherit from `BaseObjective` for `benchopt` to work properly.
 
@@ -32,17 +31,25 @@ class Objective(BaseObjective):
 
     parameters = {
         'evaluation_process, subject, subject_test, session_test': [
+            ('inter_session', 1, None, None),
             ('intra_subject', 1, None, None),
-            ('inter_subject', None, 3, None),
+            ('inter_subject', None, None, None),
+
         ],
     }
+
+    cv = KFold(n_splits=5, random_state=42, shuffle=True)
+    # cv object from sklearn
+
     # The solvers will train on all the subject except subject_test.
     # It will be the same for the sessions.
     # Minimal version of benchopt required to run this benchmark.
     # Bump it up if the benchmark depends on a new feature of benchopt.
-    min_benchopt_version = "1.3.2"
 
-    def set_data(self, dataset, paradigm_name, sfreq):
+    # min_benchopt_version = "1.3.2" , we don't specify the version because
+    # we are working with the branch ENH_implement_cv of chris-mrn/benchopt
+
+    def set_data(self, dataset, sfreq):
         # The keyword arguments of this function are the keys of the dictionary
         # returned by `Dataset.get_data`. This defines the benchmark's
         # API to pass data. This is customizable for each benchmark.
@@ -57,59 +64,61 @@ class Objective(BaseObjective):
             # we have to susbtract 1 to the labels for compatibility reasons
             # with the deep learning solvers
 
-            # maybe we need to do here different process for each subjects
-
-            X_train, X_test, y_train, y_test = train_test_split(X, y)
-            self.X_train, self.y_train = X_train, y_train
-            self.X_test, self.y_test = X_test, y_test
+            self.X = X
+            self.y = y
 
         elif self.evaluation_process == 'inter_subject':
             # the evaluation proccess here is to leave one subject out
             #  to test on it and train on the rest of the subjects
 
-            sujet_test = self.subject_test
-            data_subject_test = data_split_subject[str(sujet_test)]
-            n_subject = len(data_split_subject)
-            data_subject_train = []
-            for i in range(1, n_subject+1):
-                if i != sujet_test:
-                    data_subject_train += data_split_subject[str(i)]
+            data_inter_subject = []
+            group_subject = []
+            for key in data_split_subject.items():
+                id_subject = int(key[0])
+                data_subject = data_split_subject[str(id_subject)]
+                data_inter_subject += data_subject
+                group_subject += [id_subject for i in range(len(data_subject))]
 
-            splitted_data = split_windows_train_test(data_subject_train,
-                                                     data_subject_test)
+            X = SliceDataset(data_inter_subject, idx=0)
+            y = np.array(list(SliceDataset(data_inter_subject, idx=1)))-1
 
-            self.X_train = splitted_data['X_train']
-            self.y_train = splitted_data['y_train']
-            self.X_test = splitted_data['X_test']
-            self.y_test = splitted_data['y_test']
+            # you need to define the groups for the cv object here
+
+            self.groups = group_subject
+
+            self.cv = LeaveOneGroupOut()
+
+            self.X = X
+            self.y = y
 
         elif self.evaluation_process == 'inter_session':
             # the evaluation proccess here is to leave one session out
             #  to test on it and train on the rest of the sessions
-
+            data_inter_session = []
+            group_session = []
             data_subject = data_split_subject[str(self.subject)]
             data_split_session = data_subject.split('session')
-            session_test = self.session_test
-            data_session_test = data_split_session[session_test]
-            data_session_train = []
             for key in data_split_session.items():
-                if key[0] != str(session_test):
-                    data_session_train += data_split_session[key[0]]
+                id_session = key[0]
+                data_session = data_split_session[key[0]]
+                data_inter_session += data_session
+                group_session += [id_session for i in range(len(data_session))]
 
-            splitted_data = split_windows_train_test(data_session_train,
-                                                     data_session_test)
+            X = SliceDataset(data_inter_session, idx=0)
+            y = np.array(list(SliceDataset(data_inter_session, idx=1)))-1
 
-            self.X_train = splitted_data['X_train']
-            self.y_train = splitted_data['y_train']
-            self.X_test = splitted_data['X_test']
-            self.y_test = splitted_data['y_test']
+            self.groups = group_session
+
+            self.cv = LeaveOneGroupOut()
+
+            self.X = X
+            self.y = y
 
         self.sfreq = sfreq
 
         return dict(
-            X_train=self.X_train, y_train=self.y_train,
-            X_test=self.X_test, y_test=self.y_test,
-            sfreq=self.sfreq,
+            X=self.X,
+            y=self.y
         )
 
     def compute(self, model):
@@ -148,7 +157,26 @@ class Objective(BaseObjective):
         # benchmark's API for passing the objective to the solver.
         # It is customizable for each benchmark.
 
-        X_train, X_test, y_train, y_test = self.get_split(self.X, self.y)
+        '''
+        If you choosed a cv that needs to have a group parameter,
+        you need to pass in the inputs of get_split.
+        '''
+
+        if self.evaluation_process == 'intra_subject':
+
+            X_train, X_test, y_train, y_test = self.get_split(
+                                                        self.X,
+                                                        self.y)
+
+        else:
+
+            X_train, X_test, y_train, y_test = self.get_split(
+                                                        self.X,
+                                                        self.y,
+                                                        groups=self.groups)
+
+        self.X_train, self.y_train = X_train, y_train
+        self.X_test, self.y_test = X_test, y_test
 
         return dict(
             X=self.X_train,

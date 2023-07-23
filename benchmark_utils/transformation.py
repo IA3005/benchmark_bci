@@ -89,7 +89,6 @@ def smooth_timemask(
                                 mask_len_samples=mls,
                                 random_state=seed
                                     )
-
         param_augm = transform.get_augmentation_params(X_torch, y_torch)
         mls = param_augm["mask_len_samples"]
         msps = param_augm["mask_start_per_sample"]

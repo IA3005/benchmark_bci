@@ -32,5 +32,4 @@ class Dataset(BaseDataset):
         dataset, sfreq = windows_data(data, "LeftRightImagery")
 
         return dict(dataset=dataset,
-                    paradigm_name="LeftRightImagery",
                     sfreq=sfreq)

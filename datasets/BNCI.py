@@ -30,5 +30,4 @@ class Dataset(BaseDataset):
         dataset, sfreq = windows_data(data, self.paradigm_name)
 
         return dict(dataset=dataset,
-                    paradigm_name=self.paradigm_name,
                     sfreq=sfreq)
