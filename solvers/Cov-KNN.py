@@ -2,37 +2,23 @@ from benchopt import BaseSolver, safe_import_context
 
 
 with safe_import_context() as import_ctx:
-    from pathlib import Path
-    from skorch.helper import SliceDataset, to_numpy
     from sklearn.pipeline import make_pipeline
     from sklearn.pipeline import FunctionTransformer
 
-    from benchmark_utils.pipeline import parser_pipelines
+    from pyriemann.estimation import Covariances
+    from pyriemann.classification import KNearestNeighbor
 
-# Getting the path base on the file.
-pipeline_folder = str(Path(__file__).parent.parent / "pipelines")
+    from skorch.helper import to_numpy
 
 
 class Solver(BaseSolver):
-    name = "MOABBPipelines"
-    parameters = {
-        "pipeline": [
-            "Aug-Cov_reg-Tang-SVM",
-            "Cov-CSP-LDA_shr",
-            "Cov-CSP-LDA_svd",
-            "Cov-FgMDM",
-            "Cov-MDM",
-            # 'Cov-MDMAug', Not working, contact Chris later
-            "Cov-Tang-LogReg",
-            "Cov-Tang-LogReg_ElNet",
-            "Cov-Tang-SVM",
-            "Cov-TRCSP-LDA",
-            "DUMMY",
-            "LogVar-LDA",
-            "LogVar-SVM",
-        ]
-    }
+    name = "Cov-KNN"
 
+    parameters = {
+        "covariances_estimator": ["oas"],
+        "KNN_cov_metric": ["euclid"],
+        "n_neighbors": [7],
+    }
     sampling_strategy = "run_once"
 
     def set_objective(self, X, y, sfreq, extra_info):
@@ -46,10 +32,14 @@ class Solver(BaseSolver):
         """
         self.sfreq = sfreq
         self.X = X
-        self.y = y
+        self.y = to_numpy(y)
+
         self.clf = make_pipeline(
             FunctionTransformer(to_numpy),
-            parser_pipelines(pipeline_folder)[self.pipeline],
+            Covariances(estimator=self.covariances_estimator),
+            KNearestNeighbor(
+                n_neighbors=self.n_neighbors, metric=self.KNN_cov_metric
+            ),
         )
 
     def run(self, _):
@@ -58,9 +48,6 @@ class Solver(BaseSolver):
         With this dataset, we consider that the performance curve is sampled
         for various number of augmentation applied to the dataset.
         """
-        if isinstance(self.y, SliceDataset):
-            self.y = to_numpy(self.y)
-
         self.clf.fit(self.X, self.y)
 
     def get_result(self):
